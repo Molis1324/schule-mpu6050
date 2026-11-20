@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pico Sensor Live</title>
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--fg:#1a1d23;--mut:#6b7280;--acc:#2563eb;--bd:#e2e5ea;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1115;--card:#181b21;--fg:#e8eaee;--mut:#98a0ad;--acc:#5b9bff;--bd:#2a2f38}}
+:root[data-theme="dark"]{--bg:#0f1115;--card:#181b21;--fg:#e8eaee;--mut:#98a0ad;--acc:#5b9bff;--bd:#2a2f38}
+html{color-scheme:light dark}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:900px;margin:0 auto;padding:16px}
+h1{font-size:1.3rem;margin:0 0 12px}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+button{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:10px 16px;font-size:1rem;cursor:pointer}
+button.sec{background:var(--card);color:var(--fg);border:1px solid var(--bd)}
+#st{color:var(--mut);font-size:.9rem}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;overflow:hidden}
+#view{height:380px}
+#view canvas{display:block;width:100%!important;height:100%!important}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-top:12px}
+.v{padding:10px 12px}.v small{color:var(--mut);display:block}.v b{font-size:1.2rem;font-variant-numeric:tabular-nums}
+canvas#plot{width:100%;height:140px;display:block;margin-top:12px}
+</style>
+</head>
+<body>
+<main>
+<h1>Pico W Sensor Live</h1>
+<div class="bar">
+  <button id="btn">Verbinden</button>
+  <button id="zero" class="sec">Yaw nullen</button>
+  <span id="st">Nicht verbunden. Chrome oder Edge am PC nötig.</span>
+</div>
+<div class="card" id="view"></div>
+<div class="grid">
+  <div class="card v"><small>Roll</small><b id="r">0°</b></div>
+  <div class="card v"><small>Pitch</small><b id="p">0°</b></div>
+  <div class="card v"><small>Yaw</small><b id="y">0°</b></div>
+  <div class="card v"><small>Beschleunigung (g)</small><b id="a">0</b></div>
+</div>
+<div class="card"><canvas id="plot" width="860" height="140"></canvas></div>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+// ---- 3D ----
+const view=$('view');
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+view.appendChild(renderer.domElement);
+const scene=new THREE.Scene();
+const cam=new THREE.PerspectiveCamera(45,1,0.1,100);cam.position.set(3.5,3,4.5);cam.lookAt(0,0,0);
+scene.add(new THREE.AmbientLight(0xffffff,.7));
+const dl=new THREE.DirectionalLight(0xffffff,.8);dl.position.set(3,5,4);scene.add(dl);
+scene.add(new THREE.GridHelper(8,16,0x888888,0x888888));
+scene.add(new THREE.AxesHelper(1.6));
+const body=new THREE.Group();body.rotation.order='YZX';scene.add(body);
+const board=new THREE.Mesh(new THREE.BoxGeometry(2,.15,1.2),new THREE.MeshStandardMaterial({color:0x2563eb}));
+body.add(board);
+const nose=new THREE.Mesh(new THREE.BoxGeometry(.5,.2,.3),new THREE.MeshStandardMaterial({color:0xf59e0b}));
+nose.position.set(.85,.02,0);body.add(nose); // Sensor-X-Richtung
+function resize(){const w=view.clientWidth,h=view.clientHeight;renderer.setSize(w,h,false);cam.aspect=w/h;cam.updateProjectionMatrix()}
+addEventListener('resize',resize);resize();
+(function loop(){requestAnimationFrame(loop);renderer.render(scene,cam)})();
+
+// ---- Filter ----
+let roll=0,pitch=0,yaw=0,last=0,bias={x:0,y:0,z:0},calN=0,cal=null;
+const D=Math.PI/180,hist=[];
+function update(ax,ay,az,gx,gy,gz){
+  const t=performance.now();
+  if(cal){cal.x+=gx;cal.y+=gy;cal.z+=gz;calN++;
+    if(calN>=50){bias={x:cal.x/calN,y:cal.y/calN,z:cal.z/calN};cal=null;$('st').textContent='Verbunden, Daten laufen.'}
+    else{$('st').textContent='Kalibriere Gyro, bitte ruhig halten …';last=t;return}}
+  const dt=last?(t-last)/1000:0;last=t;
+  gx-=bias.x;gy-=bias.y;gz-=bias.z;
+  const aRoll=Math.atan2(ay,az)/D,aPitch=Math.atan2(-ax,Math.hypot(ay,az))/D;
+  roll=.98*(roll+gx*dt)+.02*aRoll;
+  pitch=.98*(pitch+gy*dt)+.02*aPitch;
+  yaw+=gz*dt;
+  body.rotation.x=roll*D;body.rotation.z=-pitch*D;body.rotation.y=yaw*D;
+  $('r').textContent=roll.toFixed(1)+'°';$('p').textContent=pitch.toFixed(1)+'°';$('y').textContent=yaw.toFixed(1)+'°';
+  const m=Math.hypot(ax,ay,az);$('a').textContent=m.toFixed(2);
+  hist.push([ax,ay,az]);if(hist.length>200)hist.shift();drawPlot();
+}
+function drawPlot(){
+  const c=$('plot'),g=c.getContext('2d'),W=c.width,H=c.height;
+  g.clearRect(0,0,W,H);g.strokeStyle=css('--bd');g.beginPath();g.moveTo(0,H/2);g.lineTo(W,H/2);g.stroke();
+  ['#ef4444','#22c55e','#3b82f6'].forEach((col,k)=>{
+    g.strokeStyle=col;g.lineWidth=1.5;g.beginPath();
+    hist.forEach((v,i)=>{const x=i/199*W,y=H/2-v[k]/4*H/2;i?g.lineTo(x,y):g.moveTo(x,y)});g.stroke()});
+}
+$('zero').onclick=()=>{yaw=0};
+
+// ---- Web Serial ----
+let port,reader;
+$('btn').onclick=async()=>{
+  if(!('serial' in navigator)){$('st').textContent='Web Serial fehlt: bitte Chrome oder Edge am PC benutzen.';return}
+  if(port){try{await reader.cancel()}catch(e){}return}
+  try{
+    port=await navigator.serial.requestPort();
+    await port.open({baudRate:115200});
+  }catch(e){$('st').textContent='Port konnte nicht geöffnet werden (Thonny noch offen?): '+e.message;port=null;return}
+  $('btn').textContent='Trennen';cal={x:0,y:0,z:0};calN=0;roll=pitch=yaw=0;last=0;
+  const dec=new TextDecoderStream();port.readable.pipeTo(dec.writable).catch(()=>{});
+  reader=dec.readable.getReader();let buf='';
+  try{
+    while(true){
+      const {value,done}=await reader.read();if(done)break;
+      buf+=value;let i;
+      while((i=buf.indexOf('\n'))>=0){
+        const line=buf.slice(0,i).trim();buf=buf.slice(i+1);
+        const p=line.split(',').map(Number);
+        if(p.length>=6&&p.every(isFinite))update(...p);
+      }
+    }
+  }catch(e){}
+  try{reader.releaseLock()}catch(e){}
+  try{await port.close()}catch(e){}
+  port=null;$('btn').textContent='Verbinden';$('st').textContent='Getrennt.';
+};
+</script>
+</body>
+</html>
