@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sensor-Steuerung</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;800&family=Nunito:wght@600;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg1:#070b1f;--bg2:#1a0b3a;--card:rgba(20,26,60,.65);--fg:#eaf2ff;--mut:#8fa3d6;--cy:#22e6ff;--mg:#ff3ec9;--lime:#8cff4a;--yl:#ffd23e;--bd:rgba(34,230,255,.35);box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{color-scheme:dark;min-height:100%}
+body{margin:0;min-height:100vh;color:var(--fg);font-family:"Nunito",system-ui,sans-serif;background:radial-gradient(ellipse at 20% 0%,var(--bg2),var(--bg1) 60%) fixed}
+main{max-width:980px;margin:0 auto;padding:18px}
+h1{font-family:"Orbitron",system-ui,sans-serif;font-weight:800;font-size:clamp(1.3rem,4vw,2rem);margin:0 0 4px;letter-spacing:.08em;background:linear-gradient(90deg,var(--cy),var(--mg));-webkit-background-clip:text;background-clip:text;color:transparent}
+.sub{color:var(--mut);margin:0 0 14px}
+.bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+button{font-family:"Orbitron",system-ui,sans-serif;font-weight:500;font-size:.85rem;letter-spacing:.05em;color:#06122b;background:linear-gradient(135deg,var(--cy),#6bf0ff);border:0;border-radius:999px;padding:12px 20px;cursor:pointer;box-shadow:0 0 18px rgba(34,230,255,.55);transition:transform .12s}
+button:hover{transform:translateY(-2px) scale(1.03)}
+button.sec{background:transparent;color:var(--cy);border:1.5px solid var(--bd);box-shadow:none}
+button.on{background:var(--mg);color:#fff;border-color:var(--mg);box-shadow:0 0 14px rgba(255,62,201,.6)}
+#st{color:var(--mut);font-weight:600}
+.seg{display:inline-flex;gap:4px;padding:4px;border:1.5px solid var(--bd);border-radius:999px;background:var(--card)}
+.seg button{padding:10px 16px}
+.seg button.sec{border-color:transparent}
+.card{background:var(--card);border:1.5px solid var(--bd);border-radius:20px;overflow:hidden;backdrop-filter:blur(8px);box-shadow:0 0 28px rgba(34,230,255,.12),inset 0 0 30px rgba(34,230,255,.05)}
+#view{height:min(430px,60vh)}
+#view canvas{display:block;width:100%!important;height:100%!important}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-top:14px}
+.v{padding:12px 14px}
+.v small{color:var(--mut);display:block;font-weight:800}
+.v b{font-family:"Orbitron",system-ui,sans-serif;font-size:1.5rem;font-variant-numeric:tabular-nums}
+.c1 b{color:var(--cy)}.c2 b{color:var(--mg)}.c3 b{color:var(--lime)}
+.pow{height:16px;border-radius:99px;background:rgba(255,255,255,.1);margin-top:8px;overflow:hidden}
+#pbar{height:100%;width:0;border-radius:99px;background:linear-gradient(90deg,var(--lime),var(--yl),var(--mg));box-shadow:0 0 12px var(--yl);transition:width .08s}
+.plotbox{margin-top:14px;padding:10px 14px}
+.plotbox small{color:var(--mut);font-weight:800}
+canvas#plot{width:100%;height:130px;display:block}
+</style>
+</head>
+<body>
+<main>
+<h1>⚡ SENSOR-STEUERUNG</h1>
+<p class="sub">Bewege den Sensor und die Platine auf dem Bildschirm bewegt sich mit!</p>
+<div class="bar">
+  <button id="btn">▶ Verbinden</button>
+  <button id="zero" class="sec">↺ Drehung nullen</button>
+  <button id="flr" class="sec">⇄ Links/Rechts umkehren</button>
+  <button id="ffb" class="sec">⇅ Vor/Zurück umkehren</button>
+  <span id="st">Nicht verbunden. Bitte Chrome oder Edge am PC benutzen.</span>
+</div>
+<div class="bar">
+  <div class="seg" role="group" aria-label="Ansicht wählen">
+    <button id="m0" class="sec on" type="button">🔌 Platine</button>
+    <button id="m1" class="sec" type="button">✈ Flugzeug</button>
+    <button id="m2" class="sec" type="button">🚀 Rakete</button>
+  </div>
+</div>
+<div class="card" id="view"></div>
+<div class="grid">
+  <div class="card v c1"><small>↔ Links / Rechts</small><b id="r">0°</b></div>
+  <div class="card v c2"><small>↕ Vor / Zurück</small><b id="p">0°</b></div>
+  <div class="card v c3"><small>⟳ Drehung</small><b id="y">0°</b></div>
+  <div class="card v"><small>⚡ Power</small><b id="a">1.00 g</b><div class="pow"><div id="pbar"></div></div></div>
+</div>
+<div class="card plotbox"><small>Bewegungs-Wellen (rot = X, grün = Y, blau = Z)</small><canvas id="plot" width="900" height="130"></canvas></div>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+// Einstellungen merken (nur Komfort, darf fehlschlagen)
+const store={get(k){try{return localStorage.getItem(k)==='1'}catch(e){return false}},set(k,v){try{localStorage.setItem(k,v?'1':'0')}catch(e){}}};
+let flipLR=store.get('flr'),flipFB=store.get('ffb');
+function showFlip(){$('flr').classList.toggle('on',flipLR);$('ffb').classList.toggle('on',flipFB)}
+$('flr').onclick=()=>{flipLR=!flipLR;store.set('flr',flipLR);showFlip()};
+$('ffb').onclick=()=>{flipFB=!flipFB;store.set('ffb',flipFB);showFlip()};
+showFlip();
+
+// ---- 3D-Szene ----
+const view=$('view');
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+view.appendChild(renderer.domElement);
+const scene=new THREE.Scene();
+const cam=new THREE.PerspectiveCamera(45,1,0.1,200);cam.position.set(0,2.6,6.6);cam.lookAt(0,0,0);
+scene.add(new THREE.AmbientLight(0xaac4ff,.6));
+const dl=new THREE.DirectionalLight(0xffffff,.9);dl.position.set(3,6,5);scene.add(dl);
+const pl=new THREE.PointLight(0x22e6ff,1.2,12);pl.position.set(0,-1,0);scene.add(pl);
+const grid=new THREE.GridHelper(14,28,0x22e6ff,0x1b4a8a);grid.position.y=-1.6;scene.add(grid);
+// Sterne
+const sp=[];for(let i=0;i<700;i++){const r=25+Math.random()*30,t=Math.random()*6.283,u=Math.acos(2*Math.random()-1);sp.push(r*Math.sin(u)*Math.cos(t),r*Math.cos(u),r*Math.sin(u)*Math.sin(t))}
+const sg=new THREE.BufferGeometry();sg.setAttribute('position',new THREE.Float32BufferAttribute(sp,3));
+const stars=new THREE.Points(sg,new THREE.PointsMaterial({color:0xffffff,size:.18}));scene.add(stars);
+// Gemeinsamer Körper (wird vom Sensor gedreht), darin drei umschaltbare Modelle
+const body=new THREE.Group();body.rotation.order='YZX';scene.add(body);
+const M=(c,e,m,r)=>new THREE.MeshStandardMaterial({color:c,emissive:e||0x000000,metalness:m==null?.4:m,roughness:r==null?.4:r});
+const boardG=new THREE.Group();body.add(boardG);
+const planeG=new THREE.Group();body.add(planeG);
+const rocketG=new THREE.Group();body.add(rocketG);
+// Pico-Platine mit USB-Kabel (Kabel zeigt in Sensor-X-Richtung)
+const B=(w,h,d,mat,x,y,z)=>{const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);o.position.set(x,y,z);boardG.add(o);return o};
+B(2.4,.12,1.0,M(0x0b8f5a,0x04301f,.2,.6),0,0,0);                 // Platine
+B(.4,.03,.4,M(0x111111,0x000000,.3,.5),-.2,.075,0);               // Chip
+B(.45,.04,.35,M(0xc9d3dc,0x000000,.9,.3),-.85,.08,.1);            // WLAN-Modul
+B(.2,.05,.2,M(0xffffff,0x222222,.1,.6),.35,.09,.3);               // BOOTSEL-Knopf
+B(.3,.12,.35,M(0xc9d3dc,0x000000,.9,.25),1.28,.1,0);              // USB-Buchse
+for(let i=0;i<20;i++){const x=-1.1+i*.116;B(.05,.07,.05,M(0xffd23e,0x6a5200,.8,.3),x,.09,.44);B(.05,.07,.05,M(0xffd23e,0x6a5200,.8,.3),x,.09,-.44)} // Pins
+B(.5,.2,.5,M(0x1a1f3a,0x000000,.2,.7),1.65,.1,0);                 // Kabel-Stecker
+const cable=new THREE.Mesh(new THREE.CylinderGeometry(.09,.09,2.2,16),M(0x22e6ff,0x0a7f92,.2,.5));
+cable.rotation.z=Math.PI/2;cable.position.set(2.9,.1,0);boardG.add(cable);
+const glow=new THREE.Mesh(new THREE.BoxGeometry(2.5,.02,1.1),new THREE.MeshBasicMaterial({color:0x22e6ff,transparent:true,opacity:.25}));glow.position.y=-.08;boardG.add(glow);
+
+// Hilfsfunktion für Flugzeug und Rakete (Nase zeigt in +X, wie das Kabel)
+const A=(g,geo,mat,x,y,z)=>{const o=new THREE.Mesh(geo,mat);o.position.set(x,y,z);g.add(o);return o};
+const HP=Math.PI/2;
+const white=()=>M(0xeaf2ff,0x1a2a4a,.3,.4), cyan=()=>M(0x22e6ff,0x0a7f92,.3,.4), pink=()=>M(0xff3ec9,0x6a0f52,.3,.4), grey=()=>M(0xc9d3dc,0x000000,.9,.3);
+
+// Flugzeug
+A(planeG,new THREE.CylinderGeometry(.24,.24,2.6,20),white(),0,0,0).rotation.z=HP;          // Rumpf
+A(planeG,new THREE.ConeGeometry(.24,.7,20),cyan(),1.65,0,0).rotation.z=-HP;                 // Nase
+A(planeG,new THREE.ConeGeometry(.24,.5,20),white(),-1.55,0,0).rotation.z=HP;                // Heck
+A(planeG,new THREE.BoxGeometry(1.0,.07,3.4),pink(),.1,-.05,0);                              // Tragflächen
+A(planeG,new THREE.BoxGeometry(.5,.05,1.2),cyan(),-1.25,0,0);                               // Höhenleitwerk
+A(planeG,new THREE.BoxGeometry(.6,.6,.06),pink(),-1.25,.4,0);                               // Seitenleitwerk
+const cockpit=A(planeG,new THREE.SphereGeometry(.17,16,12),cyan(),.7,.2,0);cockpit.scale.set(1.5,.8,.8);
+[-.8,.8].forEach(z=>A(planeG,new THREE.CylinderGeometry(.12,.12,.6,16),grey(),.25,-.25,z).rotation.z=HP); // Triebwerke
+
+// Rakete
+A(rocketG,new THREE.CylinderGeometry(.32,.32,2.6,24),white(),0,0,0).rotation.z=HP;         // Körper
+A(rocketG,new THREE.ConeGeometry(.32,.9,24),pink(),1.75,0,0).rotation.z=-HP;                // Spitze
+A(rocketG,new THREE.CylinderGeometry(.33,.33,.25,24),cyan(),-.3,0,0).rotation.z=HP;         // Streifen
+A(rocketG,new THREE.SphereGeometry(.14,16,12),M(0x1a1f3a,0x0a7f92,.2,.3),.5,.1,.3);         // Fenster
+A(rocketG,new THREE.CylinderGeometry(.2,.28,.3,20),grey(),-1.45,0,0).rotation.z=HP;         // Düse
+for(let k=0;k<4;k++){const fg=new THREE.Group();fg.rotation.x=k*HP;rocketG.add(fg);A(fg,new THREE.BoxGeometry(.7,.6,.06),pink(),-1.0,.5,0)} // Flossen
+const flame=A(rocketG,new THREE.ConeGeometry(.2,.9,16),new THREE.MeshBasicMaterial({color:0xffd23e,transparent:true,opacity:.85}),-2,0,0);
+flame.rotation.z=HP;
+
+// ---- Umschalter: Platine / Flugzeug / Rakete ----
+const models=[boardG,planeG,rocketG];
+function setMode(n){models.forEach((g,i)=>{g.visible=i===n;$('m'+i).classList.toggle('on',i===n)})}
+[0,1,2].forEach(i=>{$('m'+i).onclick=()=>setMode(i)});
+setMode(0);
+
+function resize(){const w=view.clientWidth,h=view.clientHeight;renderer.setSize(w,h,false);cam.aspect=w/h;cam.updateProjectionMatrix()}
+addEventListener('resize',resize);resize();
+(function loop(){requestAnimationFrame(loop);
+  stars.rotation.y+=.0004;
+  if(rocketG.visible){const f=1+.25*Math.sin(performance.now()*.03)+.1*Math.random();flame.scale.set(1,f,1);flame.position.x=-1.6-.45*f}
+  renderer.render(scene,cam)})();
+
+// ---- Sensorfilter ----
+let roll=0,pitch=0,yaw=0,last=0,bias={x:0,y:0,z:0},calN=0,cal=null;
+const D=Math.PI/180,hist=[];
+function update(ax,ay,az,gx,gy,gz){
+  const t=performance.now();
+  if(cal){cal.x+=gx;cal.y+=gy;cal.z+=gz;calN++;
+    if(calN>=50){bias={x:cal.x/calN,y:cal.y/calN,z:cal.z/calN};cal=null;$('st').textContent='Verbunden, los geht\u2019s! 🚀'}
+    else{$('st').textContent='Kalibriere … bitte kurz ganz ruhig halten';last=t;return}}
+  const dt=last?(t-last)/1000:0;last=t;
+  gx-=bias.x;gy-=bias.y;gz-=bias.z;
+  const aRoll=Math.atan2(ay,az)/D,aPitch=Math.atan2(-ax,Math.hypot(ay,az))/D;
+  roll=.98*(roll+gx*dt)+.02*aRoll;
+  pitch=.98*(pitch+gy*dt)+.02*aPitch;
+  yaw+=gz*dt;
+  // Achsen getauscht: Sensor-Roll = Neigung links/rechts, Sensor-Pitch = vor/zurück
+  const lr=flipLR?-roll:roll, fb=flipFB?-pitch:pitch;
+  body.rotation.z=-lr*D;body.rotation.x=fb*D;body.rotation.y=yaw*D;
+  $('r').textContent=lr.toFixed(0)+'°';$('p').textContent=fb.toFixed(0)+'°';$('y').textContent=yaw.toFixed(0)+'°';
+  const m=Math.hypot(ax,ay,az),extra=Math.min(2,Math.abs(m-1));
+  $('a').textContent=m.toFixed(2)+' g';$('pbar').style.width=Math.min(100,extra*60)+'%';
+  hist.push([ax,ay,az]);if(hist.length>200)hist.shift();drawPlot();
+}
+function drawPlot(){
+  const c=$('plot'),g=c.getContext('2d'),W=c.width,H=c.height;
+  g.clearRect(0,0,W,H);g.strokeStyle='rgba(34,230,255,.25)';g.beginPath();g.moveTo(0,H/2);g.lineTo(W,H/2);g.stroke();
+  ['#ff5a6e','#8cff4a','#22e6ff'].forEach((col,k)=>{
+    g.strokeStyle=col;g.lineWidth=2;g.shadowColor=col;g.shadowBlur=8;g.beginPath();
+    hist.forEach((v,i)=>{const x=i/199*W,y=H/2-v[k]/4*H/2;i?g.lineTo(x,y):g.moveTo(x,y)});g.stroke()});
+  g.shadowBlur=0;
+}
+$('zero').onclick=()=>{yaw=0};
+
+// ---- Web Serial ----
+let port,reader;
+$('btn').onclick=async()=>{
+  if(!('serial' in navigator)){$('st').textContent='Web Serial fehlt: bitte Chrome oder Edge am PC benutzen.';return}
+  if(port){try{await reader.cancel()}catch(e){}return}
+  try{
+    port=await navigator.serial.requestPort();
+    await port.open({baudRate:115200});
+  }catch(e){$('st').textContent='Port konnte nicht geöffnet werden (Thonny noch offen?): '+e.message;port=null;return}
+  $('btn').textContent='■ Trennen';cal={x:0,y:0,z:0};calN=0;roll=pitch=yaw=0;last=0;
+  const dec=new TextDecoderStream();port.readable.pipeTo(dec.writable).catch(()=>{});
+  reader=dec.readable.getReader();let buf='';
+  try{
+    while(true){
+      const {value,done}=await reader.read();if(done)break;
+      buf+=value;let i;
+      while((i=buf.indexOf('\n'))>=0){
+        const line=buf.slice(0,i).trim();buf=buf.slice(i+1);
+        const p=line.split(',').map(Number);
+        if(p.length>=6&&p.every(isFinite))update(...p);
+      }
+    }
+  }catch(e){}
+  try{reader.releaseLock()}catch(e){}
+  try{await port.close()}catch(e){}
+  port=null;$('btn').textContent='▶ Verbinden';$('st').textContent='Getrennt.';
+};
+</script>
+</body>
+</html>
